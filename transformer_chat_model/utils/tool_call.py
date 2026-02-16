@@ -209,16 +209,16 @@ class ToolCallParser:
                 if "tool_calls" in parsed:
                     # Multiple tool calls format
                     for call in parsed["tool_calls"]:
-                        if isinstance(call, dict) and "name" in call:
+                        if isinstance(call, dict) and ("name" in call or "tool_name" in call):
                             tool_call = create_tool_call(
-                                name = call["name"],
+                                name = call.get("name") or call.get("tool_name"),
                                 args = call.get("arguments", call.get("args", {}))
                             )
                             tool_calls.append(tool_call)
-                elif "name" in parsed:
+                elif "name" in parsed or "tool_name" in parsed:
                     # Single tool call format
                     tool_call = create_tool_call(
-                        name = parsed["name"], 
+                        name = parsed.get("name") or parsed.get("tool_name"), 
                         args=parsed.get("arguments", parsed.get("args", {}))
                         )
                     tool_calls.append(tool_call)
