@@ -83,7 +83,7 @@ class TransformerChatModel(BaseChatModel):
                 "quantization_config" : self.quantization_config,
                 "token" : self.hf_token
             }
-            print("Loading Model from hugginface...\n")
+            print("Loading Model ...\n")
             self.model = AutoModelForCausalLM.from_pretrained(**load_model_config)
             self.tokenizer = AutoTokenizer.from_pretrained(self.pretrained_model_name_or_path)
         # Set pad token if not exists
@@ -97,8 +97,7 @@ class TransformerChatModel(BaseChatModel):
             except :
                 self.max_context_length = 1024
 
-    @property
-    def _generation_config(self) -> dict:
+    def _generation_config(self, **kwargs) -> dict:
         generation_config = {
             "max_new_tokens": self.max_new_tokens,
             "temperature": self.temperature,
@@ -106,6 +105,8 @@ class TransformerChatModel(BaseChatModel):
             "pad_token_id": self.tokenizer.pad_token_id,
             **self.additional_generation_kwargs
         }
+
+        generation_config.update(kwargs)
         return generation_config
 
     def _generate(
@@ -133,7 +134,7 @@ class TransformerChatModel(BaseChatModel):
             return_dict = True
         ).to(self.model.device)
 
-        generation_config = self._generation_config
+        generation_config = self._generation_config(**kwargs)
         with torch.inference_mode():
             outputs = self.model.generate(
                 **inputs,
