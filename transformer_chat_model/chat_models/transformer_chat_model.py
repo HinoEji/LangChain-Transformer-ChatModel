@@ -1,11 +1,12 @@
 import json
 import re
-from typing import Any, Dict, List, Optional, Union, Callable
-from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Optional, Union
 import inspect
-from dataclasses import dataclass
 
-from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedTokenizer, PreTrainedModel,BitsAndBytesConfig
+from pathlib import Path
+from jinja2 import Environment, FileSystemLoader
+
+from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 from pydantic import BaseModel
 
@@ -13,13 +14,13 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage,ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
-from langchain_core.tools import BaseTool, tool
+from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from collections.abc import Callable, Mapping, Sequence
+from langchain_core.runnables import Runnable
 from langchain_core.language_models import (
     LanguageModelInput
 )
-from langchain_core.runnables import Runnable
 
 from ..utils import (
     convert_lc_messages_to_hf_messages,
@@ -28,17 +29,26 @@ from ..utils import (
     ToolCallParser
 )
 
+BASE_DIR = Path(__file__).resolve().parent.parent  # transformer_chat_model/
+TEMPLATE_DIR = BASE_DIR / "prompts"
+
+ENV = Environment(
+    loader=FileSystemLoader(TEMPLATE_DIR),
+    trim_blocks=True,
+    lstrip_blocks=True,
+)
+
 class TransformerChatModel(BaseChatModel):
 
     # for creating model
     pretrained_model_name_or_path: str
-    device : str = "auto"
-    attn_implementation : str|None = None
-    quantization_config : Any = None
-    torch_dtype : Any = "auto"
-    hf_token : str|None = None # some model need authorized
+    device: str = "auto"
+    attn_implementation: str|None = None
+    quantization_config: Any = None
+    torch_dtype: Any = "auto"
+    hf_token: str|None = None # some model need authorized
     # tools
-    bound_tools : List[Any] = []
+    bound_tools: List[Any] = []
 
     # for generation
     max_new_tokens: int = 512
@@ -48,13 +58,23 @@ class TransformerChatModel(BaseChatModel):
 
     # other
     model: Any = None
-    tokenizer : Any = None
-    max_context_length : int = None
+    tokenizer: Any = None
+    max_context_length: int = None
+
+    # for template
+    template_system_name: str = "base_system.jinja2"
+    template_system: Any = None
+
+    # for debug mode
+    debug: bool = False
 
 
     def __init__(self, *, model = None, tokenizer = None, **kwargs: Any):
         # initial pydantic
         super().__init__(**kwargs)
+
+        # load template
+        self.template_system = ENV.get_template(self.template_system_name)
 
         if model and tokenizer:
             self.model = model
@@ -118,20 +138,36 @@ class TransformerChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
 
-        tool_instruction = self.get_tools_desc()
-        if tool_instruction:
-            messages = [SystemMessage(content=tool_instruction)] + messages
+        if messages[0].type == "system":
+            system_prompt = messages[0].content
+            messages = messages[1:]
+        else:
+            system_prompt = None
+
+        internal_system_prompt = self.template_system.render(
+            tools_desc = self.get_tools_desc(),
+            system_prompt = system_prompt
+        )
+        messages = [SystemMessage(content=internal_system_prompt)] + messages
+
         # convert messages to prompt
         hf_msg = convert_lc_messages_to_hf_messages(messages)
-        # tokenize
-        inputs = self.tokenizer.apply_chat_template(
+        # prompt
+        prompt = self.tokenizer.apply_chat_template(
             hf_msg,
-            tokenize=True,
-            add_generation_prompt=True,
+            tokenize = False,
+            add_generation_prompt = True,
+        )
+        if self.debug:
+            print("="*25+"DEBUG - PROMPT"+"="*25)
+            print(prompt)
+            print("=" * 50)
+        # tokenize
+        inputs = self.tokenizer(
+            prompt,
             return_tensors="pt",
             truncation=True,
-            max_length=self.max_context_length,
-            return_dict = True
+            max_length=self.max_context_length
         ).to(self.model.device)
 
         generation_config = self._generation_config(**kwargs)
@@ -151,6 +187,10 @@ class TransformerChatModel(BaseChatModel):
             # parse tool call
             tool_calls = ToolCallParser.extract_tool_calls(response)
             if tool_calls:
+                if self.debug:
+                    print("="*25+"DEBUG - TOOL CALLS"+"="*25)
+                    print(response)
+                    print("=" * 50)
                 msg = AIMessage(content="", tool_calls = tool_calls)
             else: 
                 msg = AIMessage(content = response)
@@ -162,10 +202,9 @@ class TransformerChatModel(BaseChatModel):
 
 
 
-    def get_tools_desc(self) -> str:
+    def get_tools_desc(self) -> list[str]:
         """
-        Return all tools description in a string.
-        The tool must be converted into openai format.
+        Return all tools description in a list.
         Each description is converted into format:
 
         name :
@@ -176,7 +215,7 @@ class TransformerChatModel(BaseChatModel):
 
         """
 
-        tools_desc = ""
+        tools_desc = []
         for tool in self.bound_tools:
             tool_info = tool["function"]
             tool_name = tool_info["name"]
@@ -199,35 +238,10 @@ class TransformerChatModel(BaseChatModel):
             else:
                 params_desc = "\n".join(params_desc)
 
-            tool_desc = f"""**{tool_name}**:{tool_desc}\n\tparams:\n{params_desc}\n\n"""
-            tools_desc += tool_desc
+            tool_desc = f"""**{tool_name}**:{tool_desc}\n\tparams:\n{params_desc}\n"""
+            tools_desc.append(tool_desc)
 
-        if tools_desc:
-            return f"""You have access to the following tools :
-
-    {tools_desc}
-
-    Whenever you need to use a tool, you MUST respond with a JSON code block in this exact format:
-    ```tool_call_block
-    {{
-    "tool_calls": [
-        {{
-            "name": "tool_name",
-            "arguments": {{"param1": "value1", "param2": "value2"}}
-        }}
-    ]
-    }}
-    ```
-    Only use provided tools, do not invent new ones.
-    If you don't need to use any tools, respond normally without the JSON block.
-    Tool responses are provided with a tool_call_id.
-    Always match each responese to the corresponding tool call using this ID and use the matched results to produce the final answer.
-    A user query may contain multiple sub-questions.
-    Use tools only for sub-questions that require them, answer the rest directly, and merge all results into the final response.
-    Do not explain how you use tools.
-    """
-        return ""
-
+        return tools_desc
 
     def bind_tools(
         self,
@@ -255,6 +269,8 @@ class TransformerChatModel(BaseChatModel):
             max_new_tokens = self.max_new_tokens,
             temperature = self.temperature,
             do_sample = self.do_sample,
+            template_system_name = self.template_system_name,
+            debug = self.debug,
             **self.additional_generation_kwargs
         )
 
