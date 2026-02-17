@@ -2,22 +2,35 @@ import json
 import re
 from typing import Any, Dict, List, Optional, Union
 import inspect
+from typing_extensions import override
 
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, TextIteratorStreamer
+from threading import Thread
 import torch
-from pydantic import BaseModel
 
+from pydantic import BaseModel
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage,ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
-from collections.abc import Callable, Mapping, Sequence
 from langchain_core.runnables import Runnable
+from langchain_core.messages import (
+    BaseMessage, 
+    AIMessage, 
+    HumanMessage, 
+    SystemMessage,
+    ToolMessage
+)
+from collections.abc import(
+    Callable,
+    Mapping,
+    Sequence,
+    Iterator
+)
 from langchain_core.language_models import (
     LanguageModelInput
 )
@@ -105,6 +118,7 @@ class TransformerChatModel(BaseChatModel):
             }
             print("Loading Model ...\n")
             self.model = AutoModelForCausalLM.from_pretrained(**load_model_config)
+            self.model.eval()
             self.tokenizer = AutoTokenizer.from_pretrained(self.pretrained_model_name_or_path)
         # Set pad token if not exists
         if self.tokenizer.pad_token is None:
@@ -129,6 +143,7 @@ class TransformerChatModel(BaseChatModel):
         generation_config.update(kwargs)
         return generation_config
 
+    @override
     def _generate(
         self,
         messages: list[BaseMessage],
@@ -243,6 +258,7 @@ class TransformerChatModel(BaseChatModel):
 
         return tools_desc
 
+    @override
     def bind_tools(
         self,
         tools: Sequence[dict[str, Any] | type | Callable | BaseTool],
@@ -276,6 +292,66 @@ class TransformerChatModel(BaseChatModel):
 
         return model_with_tools
 
+    def _stream_transformer(
+        self,
+        messages: List[BaseMessage] | List[Dict[str, Any]],
+        **kwargs
+    ) -> Iterator[str]:
+        """Streaming in transformer model"""
+        if messages[0].type == "system":
+            system_prompt = messages[0].content
+            messages = messages[1:]
+        else:
+            system_prompt = None
+
+        internal_system_prompt = self.template_system.render(
+            tools_desc = self.get_tools_desc(),
+            system_prompt = system_prompt
+        )
+        messages = [SystemMessage(content=internal_system_prompt)] + messages
+
+        # convert messages to prompt
+        hf_msg = convert_lc_messages_to_hf_messages(messages)
+        
+        streamer = TextIteratorStreamer(
+            self.tokenizer,
+            skip_prompt = True,
+            skip_special_tokens = True
+        )
+
+        prompt = self.tokenizer.apply_chat_template(
+            hf_msg,
+            tokenize = False,
+            add_generation_prompt = True,
+        )
+        # tokenize
+        inputs = self.tokenizer(
+            prompt,
+            return_tensors="pt",
+            truncation=True,
+            max_length=self.max_context_length
+        ).to(self.model.device)
+
+        generation_config = self._generation_config(**kwargs)
+
+        inputs.update({
+            "streamer": streamer,
+            **generation_config
+        })
+
+        def generate():
+            with torch.inference_mode():
+                self.model.generate(**inputs)
+        
+        # create thread
+        thread = Thread(target=generate)
+        thread.start()
+        
+        # yield token
+        for token in streamer:
+            yield token
+        
+        thread.join()
 
     @property
     def _llm_type(self) -> str:
