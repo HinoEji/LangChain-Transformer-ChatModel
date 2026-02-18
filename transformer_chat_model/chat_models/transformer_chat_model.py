@@ -13,7 +13,7 @@ import torch
 
 from pydantic import BaseModel
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.outputs import ChatGeneration, ChatResult, ChatGenerationChunk
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
@@ -23,7 +23,8 @@ from langchain_core.messages import (
     AIMessage, 
     HumanMessage, 
     SystemMessage,
-    ToolMessage
+    ToolMessage,
+    AIMessageChunk,
 )
 from collections.abc import(
     Callable,
@@ -50,6 +51,63 @@ ENV = Environment(
     trim_blocks=True,
     lstrip_blocks=True,
 )
+
+_WELL_KNOWN_GENERATION_PARAMS = [
+    # 2. Length Arguments
+    "max_length",
+    "max_new_tokens",
+    "min_length",
+    "min_new_tokens",
+    "early_stopping",
+    "max_time",
+    "stop_strings",
+
+    # 3. Generation Strategy
+    "do_sample",
+    "num_beams",
+    "num_beam_groups",
+    "diversity_penalty",
+    "use_cache",
+
+    # 4. Logits Manipulation / Sampling
+    "temperature",
+    "top_k",
+    "top_p",
+    "min_p",
+    "typical_p",
+    "epsilon_cutoff",
+    "eta_cutoff",
+
+    # 5. Penalties & Constraints
+    "repetition_penalty",
+    "encoder_repetition_penalty",
+    "length_penalty",
+    "no_repeat_ngram_size",
+    "bad_words_ids",
+    "force_words_ids",
+    "constraints",
+    "renormalize_logits",
+
+    # 6. Special Tokens
+    "pad_token_id",
+    "bos_token_id",
+    "eos_token_id",
+
+    # # 7. Output Variables
+    # "return_dict_in_generate",
+    # "output_attentions",
+    # "output_hidden_states",
+    # "output_scores",
+    # "output_logits",
+
+    # # 8. Advanced & Streaming
+    # "streamer",
+    # "assistant_model",
+    # "logits_processor",
+    # "stopping_criteria",
+    # "guidance_scale",
+    # "watermarking_config"
+]
 
 class TransformerChatModel(BaseChatModel):
 
@@ -140,8 +198,87 @@ class TransformerChatModel(BaseChatModel):
             **self.additional_generation_kwargs
         }
 
-        generation_config.update(kwargs)
+        # check well known generation params
+        for param in _WELL_KNOWN_GENERATION_PARAMS:
+            if param in kwargs:
+                generation_config[param] = kwargs[param]
         return generation_config
+
+    def get_tools_desc(self) -> list[str]:
+        """
+        Return all tools description in a list.
+        Each description is converted into format:
+
+        name :
+        docstring.
+        params:
+            * param1 (type)
+            * param2 (type)
+
+        """
+
+        tools_desc = []
+        for tool in self.bound_tools:
+            tool_info = tool["function"]
+            tool_name = tool_info["name"]
+            tool_desc = tool_info.get("description", "")
+            if tool_desc:
+                tool_desc = "\n\t"+tool_desc
+            params_desc = []
+            for param_name, param_info in tool_info["parameters"].get("properties",{}).items():
+                param_type = param_info.get("type", "any")
+                param_desc = param_info.get("description", "")
+                additional_info = ";".join([f"{k}: {v}" for k,v in param_info.items() if k != "type" and k != "description"])
+                if param_desc or additional_info:
+                    param_desc = f"\t\t{param_name} ({param_type}) -- {param_desc} {additional_info}"
+                else:
+                    param_desc = f"\t\t{param_name} ({param_type})"
+                params_desc.append(param_desc)
+
+            if not params_desc:
+                params_desc = "This tool don't have parameters"
+            else:
+                params_desc = "\n".join(params_desc)
+
+            tool_desc = f"""**{tool_name}**:{tool_desc}\n\tparams:\n{params_desc}\n"""
+            tools_desc.append(tool_desc)
+
+        return tools_desc
+
+    @override
+    def bind_tools(
+        self,
+        tools: Sequence[dict[str, Any] | type | Callable | BaseTool],
+        *,
+        tool_choice: dict | str | bool | None = None,
+        **kwargs: Any,
+    ) -> Runnable[LanguageModelInput, AIMessage]:
+
+        # convert tools to open_ai format
+        formatted_tools = [convert_to_openai_tool(tool) for tool in tools]
+        # I add tool_choice so as model can work with agent
+        # (creating agent with tool will call model.bind_tool with too_choice)
+        # I want all my tools can be used
+        model_with_tools = self.__class__(
+            model = self.model,
+            tokenizer = self.tokenizer,
+            pretrained_model_name_or_path = self.pretrained_model_name_or_path,
+            device = self.device,
+            attn_implementation = self.attn_implementation,
+            quantization_config = self.quantization_config,
+            torch_dtype = self.torch_dtype,
+            hf_token = self.hf_token,
+            bound_tools = formatted_tools,
+            max_new_tokens = self.max_new_tokens,
+            temperature = self.temperature,
+            do_sample = self.do_sample,
+            template_system_name = self.template_system_name,
+            debug = self.debug,
+            **self.additional_generation_kwargs
+        )
+
+        return model_with_tools
+
 
     @override
     def _generate(
@@ -224,83 +361,6 @@ class TransformerChatModel(BaseChatModel):
             print("=" * 50)
         return ChatResult(generations=[ChatGeneration(message=msg)])
 
-
-
-    def get_tools_desc(self) -> list[str]:
-        """
-        Return all tools description in a list.
-        Each description is converted into format:
-
-        name :
-        docstring.
-        params:
-            * param1 (type)
-            * param2 (type)
-
-        """
-
-        tools_desc = []
-        for tool in self.bound_tools:
-            tool_info = tool["function"]
-            tool_name = tool_info["name"]
-            tool_desc = tool_info.get("description", "")
-            if tool_desc:
-                tool_desc = "\n\t"+tool_desc
-            params_desc = []
-            for param_name, param_info in tool_info["parameters"].get("properties",{}).items():
-                param_type = param_info.get("type", "any")
-                param_desc = param_info.get("description", "")
-                additional_info = ";".join([f"{k}: {v}" for k,v in param_info.items() if k != "type" and k != "description"])
-                if param_desc or additional_info:
-                    param_desc = f"\t\t{param_name} ({param_type}) -- {param_desc} {additional_info}"
-                else:
-                    param_desc = f"\t\t{param_name} ({param_type})"
-                params_desc.append(param_desc)
-
-            if not params_desc:
-                params_desc = "This tool don't have parameters"
-            else:
-                params_desc = "\n".join(params_desc)
-
-            tool_desc = f"""**{tool_name}**:{tool_desc}\n\tparams:\n{params_desc}\n"""
-            tools_desc.append(tool_desc)
-
-        return tools_desc
-
-    @override
-    def bind_tools(
-        self,
-        tools: Sequence[dict[str, Any] | type | Callable | BaseTool],
-        *,
-        tool_choice: dict | str | bool | None = None,
-        **kwargs: Any,
-    ) -> Runnable[LanguageModelInput, AIMessage]:
-
-        # convert tools to open_ai format
-        formatted_tools = [convert_to_openai_tool(tool) for tool in tools]
-        # I add tool_choice so as model can work with agent
-        # (creating agent with tool will call model.bind_tool with too_choice)
-        # I want all my tools can be used
-        model_with_tools = self.__class__(
-            model = self.model,
-            tokenizer = self.tokenizer,
-            pretrained_model_name_or_path = self.pretrained_model_name_or_path,
-            device = self.device,
-            attn_implementation = self.attn_implementation,
-            quantization_config = self.quantization_config,
-            torch_dtype = self.torch_dtype,
-            hf_token = self.hf_token,
-            bound_tools = formatted_tools,
-            max_new_tokens = self.max_new_tokens,
-            temperature = self.temperature,
-            do_sample = self.do_sample,
-            template_system_name = self.template_system_name,
-            debug = self.debug,
-            **self.additional_generation_kwargs
-        )
-
-        return model_with_tools
-
     def _stream_transformer(
         self,
         messages: List[BaseMessage] | List[Dict[str, Any]],
@@ -361,6 +421,26 @@ class TransformerChatModel(BaseChatModel):
             yield token
         
         thread.join()
+
+    @override
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        """Stream tokens from the model."""
+
+        for token in self._stream_transformer(messages, **kwargs):
+            yield ChatGenerationChunk(
+                message = AIMessageChunk(content=token)
+            )
+        
+        yield ChatGenerationChunk(
+            message = AIMessageChunk(content="", response_metadata={"finish_reason": "stop"})
+        )
+
 
     @property
     def _llm_type(self) -> str:
