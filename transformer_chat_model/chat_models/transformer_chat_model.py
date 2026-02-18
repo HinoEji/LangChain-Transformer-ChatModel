@@ -109,6 +109,34 @@ _WELL_KNOWN_GENERATION_PARAMS = [
     # "watermarking_config"
 ]
 
+class StreamBuffer:
+    def __init__(self, tokenizer, max_size = 20):
+    self.max_size = max_size
+    self.tokens = []
+    self.size = 0
+    self.tokenizer = tokenizer
+  def peek(self):
+    if self.size == 0:
+      raise Exception("Tokens is empty")
+    element = self.tokens[0]
+    self.tokens = self.tokens[1:]
+    self.size -= 1
+    return element
+  def push(self, element):
+    if self.size < self.max_size:
+      self.tokens.append(element)
+      self.size += 1
+    else:
+      _ = self.peek()
+      self.tokens.append(element)
+  @property
+  def text(self):
+    return self.tokenizer.convert_tokens_to_string(self.tokens) if self.size > 0 else ""
+
+  def is_full(self):
+    return self.size == self.max_size
+
+
 class TransformerChatModel(BaseChatModel):
 
     # for creating model
@@ -432,11 +460,17 @@ class TransformerChatModel(BaseChatModel):
     ) -> Iterator[ChatGenerationChunk]:
         """Stream tokens from the model."""
 
+        is_tool_call = False
+        tool_chunk_idx = -1
+        stream_buffer = StreamBuffer(self.tokenizer)
+        
         for token in self._stream_transformer(messages, **kwargs):
+
             yield ChatGenerationChunk(
                 message = AIMessageChunk(content=token)
             )
         
+        # yield final chunk
         yield ChatGenerationChunk(
             message = AIMessageChunk(content="", response_metadata={"finish_reason": "stop"})
         )
