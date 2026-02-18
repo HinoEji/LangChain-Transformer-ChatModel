@@ -1,4 +1,4 @@
 jinja2
 bitsandbytes
-transformers==4.48.0
+transformers==4.57.5
 langchain>=1.2.8
