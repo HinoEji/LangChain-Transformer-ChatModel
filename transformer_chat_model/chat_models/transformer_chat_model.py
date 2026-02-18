@@ -173,11 +173,7 @@ class TransformerChatModel(BaseChatModel):
             tokenize = False,
             add_generation_prompt = True,
         )
-        if self.debug:
-            print("="*25+"DEBUG - PROMPT"+"="*25)
-            print(prompt)
-            print("=" * 50)
-        # tokenize
+
         inputs = self.tokenizer(
             prompt,
             return_tensors="pt",
@@ -213,6 +209,19 @@ class TransformerChatModel(BaseChatModel):
             msg = AIMessage(content = response)
         # post-process to extract tool_call here
         # CODE
+        if self.debug:
+            messages.append(AIMessage(content = response))
+            hf_msg = convert_lc_messages_to_hf_messages(messages)
+            # prompt
+            prompt = self.tokenizer.apply_chat_template(
+                hf_msg,
+                tokenize = False,
+                add_generation_prompt = True,
+            )
+
+            print("="*25+"DEBUG - PROMPT"+"="*25)
+            print(prompt)
+            print("=" * 50)
         return ChatResult(generations=[ChatGeneration(message=msg)])
 
 

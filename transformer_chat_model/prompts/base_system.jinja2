@@ -20,25 +20,21 @@ You have access to the following tools:
     {%for tool in tools_desc %}
 {{tool}}
     {%endfor %}
-Whenever you need to use a tool, you MUST respond with a JSON code block in this exact format:
+
+Whenever you need to use tools, you MUST use <tool_call> tags to wrap your tool calls at one time.
+Each tool call MUST have exactly one key 'name' and one key 'arguments'.
+All tool calls must be in this format exactly:
     {%-raw %}
-```tool_call_block
-{
-    "tool_calls": [
-        {
-            "name": tool_name,
-            "arguments": {"param1": "value1", "param2": "value2"}
-            }
-        ]
+<tool_call>
+[
+    {
+        "name": tool_name,
+        "arguments": {"param1": value1, "param2": value2}
     }
-```
+]
+</tool_call>
     {%-endraw %}
 
 Only use provided tools, do not invent new ones.
-If you don't need to use any tools, respond normally without the JSON block.
-Tool responses are provided with a tool_call_id.
-Always match each responese to the corresponding tool call using this ID and use the matched results to produce the final answer.
-A user query may contain multiple sub-questions.
-Use tools only for sub-questions that require them, answer the rest directly, and merge all results into the final response.
 Do not explain how you use tools.
 {%-endif %}
