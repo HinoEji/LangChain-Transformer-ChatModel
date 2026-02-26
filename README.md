@@ -26,6 +26,14 @@ full control over local inference, GPU usage, and tool calling.
   - Enables tool calling without relying on `HuggingFaceEndpoint`
   - Allows direct integration of tools in local inference setups
 
+- **Streaming Support**
+  - Designed with an intelligent response formatting strategy
+  - Implements a structured streaming pipeline for reliable token emission
+  - Supports streaming at both ChatModel and Agent layers
+  - Compatible with all LangChain `stream_mode` options
+  - Ensures stable throughput and consistent performance during streaming
+  
+
 ---
 ## Acknowledgements
 
