@@ -23,7 +23,7 @@ You have access to the following tools:
 
 Whenever you need to use tools, you MUST use <tool_call> tags to wrap your tool calls at one time.
 Each tool call MUST have exactly one key 'name' and one key 'arguments'.
-All tool calls must be in this format exactly:
+All tool calls must be in this format EXACTLY include <tool_call> tag:
     {%-raw %}
 <tool_call>
 [
@@ -35,6 +35,8 @@ All tool calls must be in this format exactly:
 </tool_call>
     {%-endraw %}
 
+RESPOND the SAME as instruction format
+DON'T provide tool_id
 Only use provided tools, do not invent new ones.
 Do not explain how you use tools.
 {%-endif %}
