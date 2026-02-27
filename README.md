@@ -65,6 +65,7 @@ Define tool and create agent:
 ```python
 from langchain_core.tools import tool
 from langchain.agents import create_agent
+from langchain_core.messages import HumanMessage
 
 # simple tool
 @tool
