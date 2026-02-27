@@ -76,7 +76,7 @@ def factorial(number: int) -> int:
     Return:
       Factorial of number of the result of number! .'''
   fact = 1
-  for in in range(1,n+1):
+  for i in range(1,n+1):
     fact*=i
   return fact
 
@@ -87,7 +87,7 @@ agent = create_agent(
 )
 
 messages = [
-  HumanMessage(content = "What is the result of 5! ?"
+  HumanMessage(content = "What is the result of 5! ?")
 ]
 
 response = agent.invoke({'messages' : messages})
