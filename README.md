@@ -35,6 +35,64 @@ full control over local inference, GPU usage, and tool calling.
   
 
 ---
+## Usage
+Install via pip:
+```bash
+pip install git+https://github.com/HinoEji/LangChain-Transformer-ChatModel.git
+```
+Create a quantized chat model.
+You can pass the same parameters used when initializing Hugging Face's AutoModelForCausalLM or LangChain's ChatModel.
+```python
+from transformer_chat_model import TransformerChatModel
+from transformers import BitsAndBytesConfig
+import torch
+
+pretrained_model_name_or_path = "Qwen/Qwen2.5-7B-Instruct-1M"
+# Create your quantization config
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_compute_dtype=torch.bfloat16
+)
+chat_model = TransformerChatModel(
+    pretrained_model_name_or_path=pretrained_model_name_or_path,
+    quantization_config = bnb_config,
+    max_new_tokens = 1024,
+    device = "auto"
+    )
+```
+Define tool and create agent:
+```python
+from langchain_core.tools import tool
+from langchain.agents import create_agent
+
+# simple tool
+@tool
+def factorial(number: int) -> int:
+  '''Use this tool to calculate the factorial of a number
+    Args:
+      number (int) --- A natural number that we want to calculate factorial of it.
+    Return:
+      Factorial of number of the result of number! .'''
+  fact = 1
+  for in in range(1,n+1):
+    fact*=i
+  return fact
+
+agent = create_agent(
+  model = chat_model,
+  tools = [factorial],
+  system_prompt = "You are a helpful assistant."
+)
+
+messages = [
+  HumanMessage(content = "What is the result of 5! ?"
+]
+
+response = agent.invoke({'messages' : messages})
+```
+
+---
 ## Acknowledgements
 
 This project is partially inspired by  
