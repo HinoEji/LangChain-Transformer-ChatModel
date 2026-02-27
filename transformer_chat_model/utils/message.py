@@ -52,14 +52,12 @@ def convert_lc_messages_to_hf_messages(messages:List[BaseMessage]) -> List[Mappi
             msg = {"role": "user", "content" : content}
             chat_messages.append(msg)
         elif _type == "tool":
-            role = "assistant"
             tool_call_id = message.tool_call_id
             status = message.status
             content = f"Respone of tool_call_id {tool_call_id} with name {message.name} and status {status} and content : {message.content}"
-            msg = {"role" : "assistant", "content" : content}
+            msg = {"role" : "user", "content" : content}
             chat_messages.append(msg)
         elif _type == "ai":
-            role = "assistant"
             # check if there is a tool call
             tool_calls = message.tool_calls
             if tool_calls: 
