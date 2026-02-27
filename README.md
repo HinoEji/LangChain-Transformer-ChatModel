@@ -4,7 +4,7 @@ This project implements a custom **TransformerChatModel** that integrates
 locally hosted transformer-based language models into the LangChain ecosystem.
 
 The model is designed to work seamlessly with LangChain agents while allowing
-full control over local inference, GPU usage, and tool calling.
+full control over local inference, GPU usage, tool calling and streaming.
 
 ---
 
