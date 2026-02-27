@@ -21,6 +21,12 @@ dependencies = [
 where = ["."]
 include = ["transformer_chat_model*"]
 
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-data]
+"transformer_chat_model" = ["prompts/*.jinja2"]
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
