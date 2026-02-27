@@ -1,0 +1,26 @@
+[project]
+name = "langchain-transformer-chatmodel"
+version = "0.1.0"
+description = "Custom Transformer Chat Model integrated with LangChain"
+readme = "README.md"
+requires-python = ">=3.9"
+
+authors = [
+    { name = "Your Name" }
+]
+
+dependencies = [
+    "jinja2",
+    "bitsandbytes",
+    "transformers==4.57.5",
+    "langchain>=1.2.8",
+    "ipywidgets"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["transformer_chat_model*"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
