@@ -196,8 +196,6 @@ class ToolCallParser:
     def _fix_json_issues(content: str) -> str:
         """Fix basic JSON issues."""
         fixed = content.strip()
-        # Remove trailing commas in arrays/objects: , } -> }
-        fixed = re.sub(r',(\s*[}\]])', r'\1', fixed)
         
         # Balance square brackets (for List)
         open_brackets = fixed.count('[') - fixed.count(']')
@@ -206,5 +204,11 @@ class ToolCallParser:
         # Balance curly braces (for Object)
         open_braces = fixed.count('{') - fixed.count('}')
         if open_braces > 0: fixed += '}' * open_braces
+
+        # fix the missing separated ','
+        fixed = re.sub(r'}\s*{', '}, {', fixed)
+
+        # Remove trailing commas in arrays/objects: , } -> }
+        fixed = re.sub(r',(\s*[}\]])', r'\1', fixed)
 
         return fixed
