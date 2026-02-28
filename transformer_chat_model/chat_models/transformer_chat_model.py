@@ -179,7 +179,7 @@ class TransformerChatModel(BaseChatModel):
             print("Loading Model ...\n")
             self.model = AutoModelForCausalLM.from_pretrained(**load_model_config)
             self.model.eval()
-            self.tokenizer = AutoTokenizer.from_pretrained(self.pretrained_model_name_or_path)
+            self.tokenizer = AutoTokenizer.from_pretrained(self.pretrained_model_name_or_path, token = self.hf_token)
         # Set pad token if not exists
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
