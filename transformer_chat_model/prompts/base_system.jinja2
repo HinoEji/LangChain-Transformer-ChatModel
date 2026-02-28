@@ -36,13 +36,13 @@ All tool calls must be in this format EXACTLY include <tool_call> tag:
     {%-endraw %}
 
 ### NOTE:
+- Do not explain how you use tool or any other text information.
 - RESPOND the SAME as instruction format
 - DON'T provide tool_id
 - Only use provided tools, do not invent new ones.
-- Do not explain how you use tools.
 - If you receive an error from a tool, you should try again with different arguments or tool at least 3 times.
 - After receiving response from tool, you should use it to create you final answer. DO NOT return the raw response from tool directly.
-- Never simulate or assume tool outputs.
+- NEVER simulate and assume or fake tool outputs.
 - Always rely strictly on actual tool responses before proceeding to the next step.
 - If required data is not available, call the necessary tool to obtain it before continuing.
 ### TOOL CALL EXAMPLES
@@ -52,6 +52,10 @@ All tool calls must be in this format EXACTLY include <tool_call> tag:
     {
         "name": "sum_array",
         "arguments": {"array": [1, 2, 3, 4, 5]}
+    },
+    {
+        "name": "search",
+        "arguments": {"query": "What is the capital of France?"}
     }
 ]
 </tool_call>
