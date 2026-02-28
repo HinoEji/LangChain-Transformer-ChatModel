@@ -54,24 +54,23 @@ def convert_lc_messages_to_hf_messages(messages:List[BaseMessage]) -> List[Mappi
         elif _type == "tool":
             tool_call_id = message.tool_call_id
             status = message.status
-            content = f"Respone of tool_call_id {tool_call_id} with name {message.name} and status {status} and content : {message.content}"
+            content = f"""<tool_call_response>\nID: {tool_call_id}\nName: {message.name}\nStatus: {status}\nContent: {message.content}\n</tool_call_response>"""
             msg = {"role" : "user", "content" : content}
             chat_messages.append(msg)
         elif _type == "ai":
             # check if there is a tool call
             tool_calls = message.tool_calls
             if tool_calls: 
-                continue
-                # prevent the tool call to be converted into a message
+                # prevent the tool call to be converted into a message with role assistant
                 # because it may guide the model the wrong format
                 # this is a tool call
-                # for tool_call in tool_calls:
-                #     name = tool_call["name"]
-                #     args = tool_call["args"]
-                #     id = tool_call["id"]
-                #     content = f"Tool Calling:\n tool_call_id : {id}\n name : {name}\n args : {args}"
-                #     msg = {"role" : "assistant", "content" : content}
-                #     chat_messages.append(msg)
+                for tool_call in tool_calls:
+                    name = tool_call["name"]
+                    args = tool_call["args"]
+                    id = tool_call["id"]
+                    content = f"""<too_call_record>\nID: {id}\nName: {name}\nArgs: {args}\n</too_call_record>"""
+                    msg = {"role" : "user", "content" : content}
+                    chat_messages.append(msg)
             else:
                 content = message.content
                 msg = {"role" : "assistant", "content" : content}
