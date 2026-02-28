@@ -22,7 +22,7 @@ full control over local inference, GPU usage, tool calling and streaming.
   - Loads transformer-based models locally using Hugging Face Transformers
   - Supports GPU acceleration for efficient inference
 
-- **Native Tool Calling Support**
+- **Tool Calling Support**
   - Enables tool calling without relying on `HuggingFaceEndpoint`
   - Allows direct integration of tools in local inference setups
 
