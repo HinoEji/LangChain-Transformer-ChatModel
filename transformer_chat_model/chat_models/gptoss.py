@@ -118,8 +118,9 @@ class GPTOSSChatModel(ClassicTransformerChatModel):
     # template_system_name: str = "gptoss_system.jinja2"
     
     def __init__(self, *, model = None, tokenizer = None, **kwargs: Any):
+        quantization_config = kwargs.get("quantization_config", None)
         if quantization_config:
-            quantization_config = None
+            kwargs["quantization_config"] = None
             print("Quantization config is auto for GPTOSS model in MXFP4")
             print("You may try the unsloth models for other quantized models.")
 
@@ -179,31 +180,50 @@ class GPTOSSChatModel(ClassicTransformerChatModel):
         analysis = analysis_match.group(1).strip() if analysis_match else None
         final = final_match.group(1).strip() if final_match else None
 
+        if final is None:
+            final = ""
+            
+
         return {
             "analysis" : analysis,
             "final" : final
         }
         
     @override
-    def _decide_reasoning_effort(self, messages: List[BaseMessage], limit_messages: int =2):
+    def _decide_reasoning_effort(self, messages: List[BaseMessage], limit_messages: int =2, **kwargs: Any):
         """Decide reasoning effort based on reasoning_effort"""
-        if self.reasoning_effort != "auto":
+            
+        if self.reasoning_effort != "auto" :
             return self.reasoning_effort
         
-        instruction_prompt = '''You are a helpful assistant with great ability to decide how much reasoning effort should be used to response the next answer.
-    Decide the reasoning effort based on the given context.
-    ## RULES:
-    - Only response : low, medium, high
-    - No explanation or any other text
-    '''
+        instruction_prompt = '''You are a classification assistant that classify user query.
+
+Your task is to classify the input into ONE of the following categories:
+- low: simple factual question, single direct answer, no reasoning
+- medium: requires basic explanation or comparison
+- high: requires multi-step reasoning, problem solving, or planning
+
+OUTPUT RULES (STRICT):
+- Return ONLY the category name.
+
+OUTPUT FORMAT:
+- low
+- medium
+- high
+
+IMPORTANT:
+- Do NOT add any other text than the category name.
+- Follow the output format EXACTLY.
+'''
         instruction_message = SystemMessage(content=instruction_prompt)
         if messages[0].type == "system":
-            new_messages = [instruction_message, messages[0]] + messages[-limit_messages:]
+            new_messages = [instruction_message, messages[0]] + messages[1:]
         else:
-            new_messages = [instruction_message] + messages[-limit_messages:]
+            new_messages = [instruction_message] + messages
+        
 
         # convert messages to prompt
-        hf_msg = convert_lc_messages_to_hf_messages(messages)
+        hf_msg = convert_lc_messages_to_hf_messages(new_messages)
         # prompt
         prompt = self.tokenizer.apply_chat_template(
             hf_msg,
@@ -216,11 +236,12 @@ class GPTOSSChatModel(ClassicTransformerChatModel):
             prompt,
             return_tensors="pt",
             truncation=True,
-            max_length=128 # for the high speed
+            max_length=self.max_context_length
         ).to(self.model.device)
 
         # generate response
         generation_config = self._generation_config(**kwargs)
+        generation_config["max_new_tokens"] = 256
         with torch.inference_mode():
             outputs = self.model.generate(
                 **inputs,
@@ -228,7 +249,7 @@ class GPTOSSChatModel(ClassicTransformerChatModel):
             )
         # Decode response
         response = self.tokenizer.decode(
-            outputs[0][inputs['input_ids'].shape[1]:],
+            outputs[0][inputs['input_ids'].shape[-1]:],
             skip_special_tokens=False
         ).strip()
 
@@ -265,7 +286,10 @@ class GPTOSSChatModel(ClassicTransformerChatModel):
         hf_msg = convert_lc_messages_to_hf_messages(messages)
 
         # decide reasoning effort
-        reasoning_effort = self._decide_reasoning_effort(messages)
+        if  kwargs.get("reasoning_effort", None) in [None, "auto"]:
+            reasoning_effort = self._decide_reasoning_effort(messages, **kwargs)
+        else:
+            reasoning_effort = kwargs["reasoning_effort"].lower()
         # prompt
         prompt = self.tokenizer.apply_chat_template(
             hf_msg,
@@ -289,14 +313,17 @@ class GPTOSSChatModel(ClassicTransformerChatModel):
             )
         # Decode response
         response = self.tokenizer.decode(
-            outputs[0][inputs['input_ids'].shape[1]:],
+            outputs[0][inputs['input_ids'].shape[-1]:],
             skip_special_tokens=False
         ).strip()
 
         # parse response
+        if self.debug:
+            print(response)
         response_dict = self._parse_response(response)
         response = response_dict["final"]
         analysis = response_dict["analysis"]
+        additional_kwargs = {"analysis": analysis, "reasoning_effort": reasoning_effort}  
         
         # speed up, tool call parsing is time consuming
         if self.bound_tools:
@@ -307,15 +334,15 @@ class GPTOSSChatModel(ClassicTransformerChatModel):
                     print("="*25+"DEBUG - TOOL CALLS"+"="*25)
                     print(response)
                     print("=" * 50)
-                msg = AIMessage(content="", tool_calls = tool_calls, additional_kwargs={"analysis": analysis})
+                msg = AIMessage(content="", tool_calls = tool_calls, additional_kwargs=additional_kwargs)
             else: 
-                msg = AIMessage(content = response, additional_kwargs={"analysis": analysis})
+                msg = AIMessage(content = response, additional_kwargs=additional_kwargs)
         else:
-            msg = AIMessage(content = response, additional_kwargs={"analysis": analysis})
+            msg = AIMessage(content = response, additional_kwargs=additional_kwargs)
         # post-process to extract tool_call here
         # CODE
         if self.debug:
-            messages.append(AIMessage(content = response, additional_kwargs={"analysis": analysis}))
+            messages.append(AIMessage(content = response, additional_kwargs=additional_kwargs))
             hf_msg = convert_lc_messages_to_hf_messages(messages)
             # prompt
             prompt = self.tokenizer.apply_chat_template(
@@ -344,7 +371,7 @@ class GPTOSSChatModel(ClassicTransformerChatModel):
             tokenizer = self.tokenizer,
             buffer_size = 6
         )
-        
-        iterator = self._stream_transformer(messages, **kwargs)
-        yield from gptoss_streamer(iterator)
+        reasoning_effort = self._decide_reasoning_effort(messages)
+        iterator = self._stream_transformer(messages, reasoning_effort = reasoning_effort, **kwargs)
+        yield from gptoss_streamer(iterator, reasoning_effort = reasoning_effort)
 

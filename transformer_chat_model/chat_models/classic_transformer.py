@@ -173,9 +173,11 @@ class ClassicTransformerChatModel(BaseChatModel):
                 "torch_dtype" : torch_dtype,
                 "device_map" : self.device,
                 "attn_implementation" : self.attn_implementation,
-                "quantization_config" : self.quantization_config,
                 "token" : self.hf_token
             }
+            if self.quantization_config:
+                load_model_config["quantization_config"] = self.quantization_config
+
             print("Loading Model ...\n")
             self.model = AutoModelForCausalLM.from_pretrained(**load_model_config)
             self.model.eval()
@@ -206,7 +208,7 @@ class ClassicTransformerChatModel(BaseChatModel):
                 generation_config[param] = kwargs[param]
         return generation_config
     
-    def _decide_reasoning_effort(self, messages: List[BaseMessage], limit_messages: int =2):
+    def _decide_reasoning_effort(self, messages: List[BaseMessage], limit_messages: int =2, **kwargs: Any):
         """Must be redefine in subclass that supports reasoning effort"""
         return None
 
@@ -370,6 +372,7 @@ class ClassicTransformerChatModel(BaseChatModel):
     def _stream_transformer(
         self,
         messages: List[BaseMessage] | List[Dict[str, Any]],
+        reasoning_effort: str|None = None,
         **kwargs
     ) -> Iterator[str]:
         """Streaming in transformer model"""
@@ -387,7 +390,8 @@ class ClassicTransformerChatModel(BaseChatModel):
 
         # convert messages to prompt
         hf_msg = convert_lc_messages_to_hf_messages(messages)
-        reasoning_effort = self._decide_reasoning_effort(messages)
+        if reasoning_effort is None:
+            reasoning_effort = self._decide_reasoning_effort(messages)
 
         if reasoning_effort:
             skip_special_tokens = False

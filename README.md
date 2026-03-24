@@ -43,7 +43,7 @@ pip install git+https://github.com/HinoEji/LangChain-Transformer-ChatModel.git
 Create a quantized chat model.
 You can pass the same parameters used when initializing Hugging Face's AutoModelForCausalLM or LangChain's ChatModel.
 ```python
-from transformer_chat_model import TransformerChatModel
+from transformer_chat_model import init_transformer_chat_model
 from transformers import BitsAndBytesConfig
 import torch
 
@@ -54,7 +54,7 @@ bnb_config = BitsAndBytesConfig(
     bnb_4bit_quant_type="nf4",
     bnb_4bit_compute_dtype=torch.bfloat16
 )
-chat_model = TransformerChatModel(
+chat_model = init_transformer_chat_model(
     pretrained_model_name_or_path=pretrained_model_name_or_path,
     quantization_config = bnb_config,
     max_new_tokens = 1024,

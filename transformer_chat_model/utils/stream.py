@@ -405,7 +405,7 @@ class GPTOSSStreamer(TransformerStreamer):
         self.tokenizer = tokenizer
         self.buffer = StreamBuffer(tokenizer = tokenizer, max_size = buffer_size)
 
-    def __call__(self, iterator):
+    def __call__(self, iterator, reasoning_effort):
         tool_call_chunk_parser = None
         is_tool_call = False
         index = -1
@@ -419,7 +419,16 @@ class GPTOSSStreamer(TransformerStreamer):
         # 1. Chỉ tồn tại 1 tool call -> tool call có thể hoàn chỉnh hoặc chưa
         # 2. Nhiều hơn 1 tool call -> chắc chắc rằng ngoại trừ tool call cuối, thì các tool call phía trước chắn chắc là đã hoàn thành và chỉ việc yield ra ngoài
         # 3. Vì (2) nên ta nên xử lí một token và tách riêng từng tool call với nhau (nếu có nhiều tool call)
-
+        chunk = AIMessageChunk(
+                content = '',
+                additional_kwargs = {
+                    "reasoning_effort" : reasoning_effort
+                }
+            )
+        chat_chunk = ChatGenerationChunk(
+            message = chunk
+        )
+        yield chat_chunk
         # xử lí phần analysis của model
         while not self.buffer.is_full():
             token = next(iterator)
