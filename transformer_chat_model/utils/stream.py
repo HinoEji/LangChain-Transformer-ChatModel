@@ -4,7 +4,8 @@ import re
 from .tool_call import ensure_id
 
 __all__ = [
-    "TransformerStreamer"
+    "TransformerStreamer",
+    "GPTOSSStreamer"
 ]
 
 class StreamBuffer:
@@ -377,6 +378,136 @@ class TransformerStreamer:
                 yield chat_chunk
             
             for token in iterator:
+                chunk = AIMessageChunk(content = token)
+                chat_chunk = ChatGenerationChunk(
+                    message = chunk
+                )
+                yield chat_chunk
+            finish_reason = "stop"
+        
+        # xử lí chunk cuối cùng
+        last_chunk = AIMessageChunk(
+            content = '',
+            finish_reason = finish_reason
+        )
+        
+        chat_chunk = ChatGenerationChunk(
+            message = last_chunk
+        )
+        yield chat_chunk
+
+
+class GPTOSSStreamer(TransformerStreamer):
+    def __init__(self, tokenizer, buffer_size: int = 6):
+        if buffer_size < 6:
+            print("Buffer size must be at least 6 to assure the algorithm works properly. Auto  set to 6")
+            buffer_size = 6
+        self.tokenizer = tokenizer
+        self.buffer = StreamBuffer(tokenizer = tokenizer, max_size = buffer_size)
+
+    def __call__(self, iterator):
+        tool_call_chunk_parser = None
+        is_tool_call = False
+        index = -1
+        depth = 0
+        inside_tool_call = False
+        chunks = []
+        finish_reason = None
+        # nếu depth = 0 và inside tool_call = true thì kết thúc một tool_call
+        # nếu depth = 1 và inside tool_call = False thì bắt đầu một tool_call và set biến inside tool_call = True
+        # khi đưa token vào một toolcallchunk parser sẽ có các trường hợp sau:
+        # 1. Chỉ tồn tại 1 tool call -> tool call có thể hoàn chỉnh hoặc chưa
+        # 2. Nhiều hơn 1 tool call -> chắc chắc rằng ngoại trừ tool call cuối, thì các tool call phía trước chắn chắc là đã hoàn thành và chỉ việc yield ra ngoài
+        # 3. Vì (2) nên ta nên xử lí một token và tách riêng từng tool call với nhau (nếu có nhiều tool call)
+
+        # xử lí phần analysis của model
+        while not self.buffer.is_full():
+            token = next(iterator)
+            self.buffer.push(token)
+            
+            if "<|channel|>analysis<|message|>" in self.buffer.text:
+                self.buffer.reset()
+        while True:
+            token = next(iterator)
+            if token == "<|end|>":
+                break
+            
+            chunk = AIMessageChunk(
+                content = '',
+                additional_kwargs = {
+                    "analysis" : token
+                }
+            )
+            chat_chunk = ChatGenerationChunk(
+                message = chunk
+            )
+            yield chat_chunk
+        
+        while not self.buffer.is_full():
+            token = next(iterator)
+            self.buffer.push(token)
+            if "<|start|>assistant<|channel|>final<|message|>" in self.buffer.text:
+                self.buffer.reset()
+                break
+
+
+        while not self.buffer.is_full():
+            token = next(iterator) # lấy từng token
+            # bỏ nó vào buffer và check xem có xuất hiện tag <tool_call> chưa
+            self.buffer.push(token)
+
+            if "<tool_call>" in self.buffer.text:
+                is_tool_call = True
+                break
+        
+        if is_tool_call:
+            remains = self._get_behind_tool_call(self.buffer.text)
+            # reset the buffer
+            self.buffer.reset()
+            if remains:
+                for token in remains:
+                    index, depth, inside_tool_call, tool_call_chunk_parser, tool_call_chunks = self._parse_chunk_from_token(token = token, index = index, depth = depth, inside_tool_call=inside_tool_call ,tool_call_chunk_parser = tool_call_chunk_parser)
+                    if tool_call_chunks:
+                        chunk = AIMessageChunk(
+                            content = '',
+                            tool_call_chunks = tool_call_chunks
+                        )
+                        
+                        chat_chunk = ChatGenerationChunk(
+                            message = chunk
+                        )
+                        yield chat_chunk
+                
+            # xử lí phần còn lại tương tự
+            for token in iterator:
+                index, depth, inside_tool_call, tool_call_chunk_parser, tool_call_chunks = self._parse_chunk_from_token(token = token, index = index, depth = depth, inside_tool_call=inside_tool_call ,tool_call_chunk_parser = tool_call_chunk_parser)
+                if tool_call_chunks:
+                    chunk = AIMessageChunk(
+                        content = '',
+                        tool_call_chunks = tool_call_chunks
+                    )
+                    
+                    chat_chunk = ChatGenerationChunk(
+                    message = chunk
+                )
+                    yield chat_chunk
+            finish_reason = "tool_calls"
+
+        else:
+            # Nếu không phải Tool Call thì trả về AIMessageChunk bình thường
+            # xả hết token trong buffer
+            for token in self.buffer.tokens:
+                if token == "<|end|>":
+                    continue
+                chunk = AIMessageChunk(content = token)
+                chat_chunk = ChatGenerationChunk(
+                    message = chunk
+                )
+                yield chat_chunk
+            
+            for token in iterator:
+                if token == "<|end|>":
+                    continue
                 chunk = AIMessageChunk(content = token)
                 chat_chunk = ChatGenerationChunk(
                     message = chunk
